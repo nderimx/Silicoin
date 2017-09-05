@@ -9,12 +9,6 @@ const Port int=8882
 const IntroNodes []inetAdress={filan,fistek,hasan,hysen}
 var ID int;
 
-type Wallet struct {
-	public_key []byte
-	private_key []byte
-	//            v
-	transactions List<Transaction>
-}
 /*
 type IPBoard struct {
 	//inetAddress still pseudo
@@ -30,7 +24,7 @@ type Node struct {
 	block_chain BlockChain
 }
 func (n *Node) gather_transactions() []Transaction {
-	//all javaesce pseudo code from here on out
+	//all javaesque pseudo code from here on out
 	transactions:=[9]Transaction
 	packet:=make(DataGramPacket{empty})
 	sock:=make(Socket{8889})
