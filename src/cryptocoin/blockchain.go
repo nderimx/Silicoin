@@ -10,17 +10,16 @@ type BlockChain struct{
 }
 
 func NewChain(prk rsa.PrivateKey, pbk rsa.PublicKey) BlockChain{
-	nonce:=GenerateNonce(3)
+	nonce:=GenerateNonce([]byte("GENESIS"), 3)
 	now:=time.Now().UnixNano()
 	h:=sha256.Sum256([]byte(fmt.Sprint(pbk)))
-	transaction:=Transaction{
+	reward:=Transaction{
 						pub_key: pbk,
-	 					amount: 60,
+	 					amount: 50,
 	 					timestamp: now,
 						hash: h[:]}
-	transaction.Sign(prk)
-	transactions:=[]Transaction{transaction}
-	return BlockChain{[]Block{NewBlock(0, transactions, []byte("GENESIS"), nonce)}}
+	reward.Sign(prk)
+	return BlockChain{[]Block{NewBlock(0, []Transaction{Transaction{}}, reward, []byte("GENESIS"), nonce)}}
 }
 func (bc *BlockChain) MinedTransaction(prk rsa.PrivateKey, pbk rsa.PublicKey) Transaction{
 	ammo:=bc.GetRewardAmount()
@@ -34,9 +33,10 @@ func (bc *BlockChain) MinedTransaction(prk rsa.PrivateKey, pbk rsa.PublicKey) Tr
 	transaction.Sign(prk)
 	return transaction
 }
-func (bc *BlockChain) GenerateBlock(transactions []Transaction) Block{
+func (bc *BlockChain) GenerateBlock(transactions []Transaction, reward Transaction) Block{
 	prev:=bc.LatestBlock()
-	bolake:=NewBlock(prev.index+1, transactions, prev.Hash(), GenerateNonce(bc.GetDifficulty()))
+	prvhash:=prev.Hash()
+	bolake:=NewBlock(prev.index+1, transactions, reward, prvhash, GenerateNonce(prvhash, bc.GetDifficulty()))
 	bc.blocks=append(bc.blocks, bolake)
 	return bolake
 }
@@ -50,58 +50,24 @@ func (bc *BlockChain) ReceiveBlock(block Block) error{
 	block.ValidatePrevHash(last_block)&&
 	block.ValidateNonce(bc.GetDifficulty())){
 		bc.blocks=append(bc.blocks, block)
+		//validate all txs
 		return nil
 	}
 	return errors.New("Block isn't valid!")
 }
 func (bc *BlockChain) GetDifficulty() int{
-	//later relate the number to the time it takes to generate a block
+	//later relate the number to the avg time it takes to generate a block
 	return 3
 }
 func (bc *BlockChain) GetRewardAmount() float64{
 	//bc.LatestBlock().index  << relate to chain length
 	return 50
 }
-func GenerateNonce(difficulty int) []byte{
-	res:=make([]byte, difficulty)
-	const basem=byte(255)
-	nonce:=make([]byte, 1)
-	for j:=0; ; j++{
-
-		for i:=0; i<len(nonce); i++{
-			if i!=0 && nonce[i]!=basem{
-				nonce[i]++
-				ph:=sha256.Sum256(nonce)
-				if bytes.Equal(ph[0:difficulty], res){
-					return nonce
-				}
-				i=-1
-			}else if i!=0 && nonce[i]==basem{
-				nonce[i]=byte(0)
-			}else{
-				for nonce[i]!=basem{
-					nonce[i]++
-					ph:=sha256.Sum256(nonce)
-					if bytes.Equal(ph[0:difficulty], res){
-						return nonce
-					}
-				}
-				nonce[i]=byte(0)
-			}
-		}
-
-		if j==len(nonce)-1{
-			for k:=0; k<len(nonce); k++{
-				nonce[k]=byte(0)
-			}
-			nonce=append(nonce, byte(0))
-		}
-	}
-}
 func (bc *BlockChain) Equals(fbc BlockChain) bool{
 	return false
-	//jk
+	//edit
 }
 func IsGoodChain(fbc BlockChain) bool{
 	return false
+	//edit
 }

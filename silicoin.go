@@ -20,19 +20,20 @@ func main(){
 	wallet1.SaveTx(chain1.LatestBlock())
 	chain2:=chain1
 	//w1 paying w2 25 units
-	firstTX, firstCHNG:=NewTransaction(wallet1.private_key,
+	firstTX, firstCHNG, terr:=NewTransaction(wallet1.private_key,
 						wallet1.public_key,
 						wallet2.public_key,
-						25, wallet1.transactions[0], 0)
+						26, wallet1.transactions[0], 0)
+	check(terr)
 	mtrx:=chain2.MinedTransaction(wallet2.private_key, wallet2.public_key)
-	txs:=[]Transaction{mtrx, firstTX, firstCHNG}
+	txs:=[]Transaction{firstTX, firstCHNG}
 	fmt.Println("generating new block...")
-	block:=chain2.GenerateBlock(txs)
+	block:=chain2.GenerateBlock(txs, mtrx)
 	err:=chain1.ReceiveBlock(block)
 	check(err)
 	wallet1.SaveTx(chain1.LatestBlock())
 	wallet2.SaveTx(chain2.LatestBlock())
-	fmt.Println(wallet1)
+	fmt.Println(chain1, "\n", chain2)
 	
 }
 ////////
@@ -41,17 +42,18 @@ func main(){
 type Block struct{
 	index int
 	transactions []Transaction
+	reward Transaction
 	prev_hash []byte
 	timestamp int64
 	nonce []byte
 }
 
-func NewBlock(i int, tr []Transaction, prhash []byte, n []byte) Block{
-	bolake:=Block{index: i, transactions: tr, prev_hash: prhash, timestamp: time.Now().UnixNano(), nonce: n}
+func NewBlock(i int, tr []Transaction, rt Transaction, prhash []byte, n []byte) Block{
+	bolake:=Block{index: i, transactions: tr, reward: rt, prev_hash: prhash, timestamp: time.Now().UnixNano(), nonce: n}
 	return bolake
 }
 func (b *Block) Hash() []byte {
-	mix:=[]byte(fmt.Sprint(b.transactions, b.prev_hash, b.timestamp, b.nonce))
+	mix:=[]byte(fmt.Sprint(b.transactions, b.reward, b.prev_hash, b.timestamp, b.nonce))
 	hash:=sha256.Sum256(mix)
 	return hash[:]
 }
@@ -63,68 +65,10 @@ func (b *Block) ValidatePrevHash(prev_block Block) bool {
 }
 func (b *Block) ValidateNonce(difficulty int) bool {
 	res:=make([]byte, difficulty)
-	h:=sha256.Sum256(b.nonce)
+	h:=sha256.Sum256(append(b.nonce, b.prev_hash...))
 	return bytes.Equal(h[0:difficulty], res)
 }
-//////////
-type BlockChain struct{
-	blocks []Block
-}
-
-func NewChain(prk rsa.PrivateKey, pbk rsa.PublicKey) BlockChain{
-	nonce:=GenerateNonce(3)
-	now:=time.Now().UnixNano()
-	h:=sha256.Sum256([]byte(fmt.Sprint(pbk)))
-	transaction:=Transaction{
-						pub_key: pbk,
-	 					amount: 60,
-	 					timestamp: now,
-						hash: h[:]}
-	transaction.Sign(prk)
-	transactions:=[]Transaction{transaction}
-	return BlockChain{[]Block{NewBlock(0, transactions, []byte("GENESIS"), nonce)}}
-}
-func (bc *BlockChain) MinedTransaction(prk rsa.PrivateKey, pbk rsa.PublicKey) Transaction{
-	ammo:=bc.GetRewardAmount()
-	now:=time.Now().UnixNano()
-	h:=sha256.Sum256([]byte(fmt.Sprint(pbk)))
-	transaction:=Transaction{
-						pub_key: pbk,
-	 					amount: ammo,
-	 					timestamp: now,
-						hash: h[:]}
-	transaction.Sign(prk)
-	return transaction
-}
-func (bc *BlockChain) GenerateBlock(transactions []Transaction) Block{
-	prev:=bc.LatestBlock()
-	bolake:=NewBlock(prev.index+1, transactions, prev.Hash(), GenerateNonce(bc.GetDifficulty()))
-	bc.blocks=append(bc.blocks, bolake)
-	return bolake
-}
-func (bc *BlockChain) LatestBlock() Block{
-	return bc.blocks[len(bc.blocks)-1]
-}
-func (bc *BlockChain) ReceiveBlock(block Block) error{
-	last_block:=bc.LatestBlock()
-	if (
-	block.ValidateIndex(last_block)&&
-	block.ValidatePrevHash(last_block)&&
-	block.ValidateNonce(bc.GetDifficulty())){
-		bc.blocks=append(bc.blocks, block)
-		return nil
-	}
-	return errors.New("Block isn't valid!")
-}
-func (bc *BlockChain) GetDifficulty() int{
-	//later relate the number to the time it takes to generate a block
-	return 3
-}
-func (bc *BlockChain) GetRewardAmount() float64{
-	//bc.LatestBlock().index  << relate to chain length
-	return 50
-}
-func GenerateNonce(difficulty int) []byte{
+func GenerateNonce(prev_hash []byte, difficulty int) []byte{
 	res:=make([]byte, difficulty)
 	const basem=byte(255)
 	nonce:=make([]byte, 1)
@@ -133,7 +77,7 @@ func GenerateNonce(difficulty int) []byte{
 		for i:=0; i<len(nonce); i++{
 			if i!=0 && nonce[i]!=basem{
 				nonce[i]++
-				ph:=sha256.Sum256(nonce)
+				ph:=sha256.Sum256(append(nonce, prev_hash...))
 				if bytes.Equal(ph[0:difficulty], res){
 					return nonce
 				}
@@ -143,7 +87,7 @@ func GenerateNonce(difficulty int) []byte{
 			}else{
 				for nonce[i]!=basem{
 					nonce[i]++
-					ph:=sha256.Sum256(nonce)
+					ph:=sha256.Sum256(append(nonce, prev_hash...))
 					if bytes.Equal(ph[0:difficulty], res){
 						return nonce
 					}
@@ -160,12 +104,72 @@ func GenerateNonce(difficulty int) []byte{
 		}
 	}
 }
+//////////
+type BlockChain struct{
+	blocks []Block
+}
+
+func NewChain(prk rsa.PrivateKey, pbk rsa.PublicKey) BlockChain{
+	nonce:=GenerateNonce([]byte("GENESIS"), 3)
+	now:=time.Now().UnixNano()
+	h:=sha256.Sum256([]byte(fmt.Sprint(pbk)))
+	reward:=Transaction{
+						pub_key: pbk,
+	 					amount: 50,
+	 					timestamp: now,
+						hash: h[:]}
+	reward.Sign(prk)
+	return BlockChain{[]Block{NewBlock(0, []Transaction{Transaction{}}, reward, []byte("GENESIS"), nonce)}}
+}
+func (bc *BlockChain) MinedTransaction(prk rsa.PrivateKey, pbk rsa.PublicKey) Transaction{
+	ammo:=bc.GetRewardAmount()
+	now:=time.Now().UnixNano()
+	h:=sha256.Sum256([]byte(fmt.Sprint(pbk)))
+	transaction:=Transaction{
+						pub_key: pbk,
+	 					amount: ammo,
+	 					timestamp: now,
+						hash: h[:]}
+	transaction.Sign(prk)
+	return transaction
+}
+func (bc *BlockChain) GenerateBlock(transactions []Transaction, reward Transaction) Block{
+	prev:=bc.LatestBlock()
+	prvhash:=prev.Hash()
+	bolake:=NewBlock(prev.index+1, transactions, reward, prvhash, GenerateNonce(prvhash, bc.GetDifficulty()))
+	bc.blocks=append(bc.blocks, bolake)
+	return bolake
+}
+func (bc *BlockChain) LatestBlock() Block{
+	return bc.blocks[len(bc.blocks)-1]
+}
+func (bc *BlockChain) ReceiveBlock(block Block) error{
+	last_block:=bc.LatestBlock()
+	if (
+	block.ValidateIndex(last_block)&&
+	block.ValidatePrevHash(last_block)&&
+	block.ValidateNonce(bc.GetDifficulty())){
+		bc.blocks=append(bc.blocks, block)
+		//validate all txs
+		return nil
+	}
+	return errors.New("Block isn't valid!")
+}
+func (bc *BlockChain) GetDifficulty() int{
+	//later relate the number to the avg time it takes to generate a block
+	return 3
+}
+func (bc *BlockChain) GetRewardAmount() float64{
+	//bc.LatestBlock().index  << relate to chain length
+	return 50
+}
 func (bc *BlockChain) Equals(fbc BlockChain) bool{
 	return false
-	//jk
+	//edit
 }
 func IsGoodChain(fbc BlockChain) bool{
 	return false
+	//edit
 }
 //////////
 type TransactionLocation struct{
@@ -183,8 +187,9 @@ type Transaction struct{
 
 
 func NewTransaction(prk rsa.PrivateKey, opbk rsa.PublicKey, rpbk rsa.PublicKey,
-					 ammo float64, prev Transaction, blck_index int) (Transaction, Transaction){
+					 ammo float64, prev Transaction, blck_index int) (Transaction, Transaction, error){
 	now:=time.Now().UnixNano()
+	var err error=nil
 	payment:=Transaction{
 						pub_key: rpbk,
 	 					amount: ammo,
@@ -203,9 +208,11 @@ func NewTransaction(prk rsa.PrivateKey, opbk rsa.PublicKey, rpbk rsa.PublicKey,
 							prev_location: TransactionLocation{blck_index, prev.TransactionHash()}}
 		change.Sign(prk)
 	}else{
+		err=errors.New("You don't have enough units to make this payment")
+		payment=Transaction{}
 		change=Transaction{}
 	}
-	return payment, change
+	return payment, change, err
 
 }
 //This method should pull transactions from the wallet, depending on the amount to be transfered
@@ -253,31 +260,51 @@ func (t *Transaction) Sign(prk rsa.PrivateKey){
 		fmt.Println("Signing Error: ", err)
 	}
 }
-func (t *Transaction) Verify(prev_pub_key rsa.PublicKey) error{
+func (t *Transaction) VerifySig(prev_pub_key rsa.PublicKey) error{
 	err:=rsa.VerifyPKCS1v15(&prev_pub_key, crypto.SHA256, t.hash, t.signature)
 	if err!=nil{
-		return errors.New("Transaction not Valid!")
+		return errors.New("Transaction signature not Valid!")
 	}
 	return nil
 }
-func (t *Transaction) FindPrevTrx(bc BlockChain) Transaction{
+func (t *Transaction) FindPrevTrx(bc BlockChain) (Transaction, bool){
 	block:=bc.blocks[t.prev_location.block_index]
 	//ptrans:=block.transactions[t.prev_location.index]
 	txs:=block.transactions
+	rw:=block.reward
+	if bytes.Equal(rw.TransactionHash(), t.prev_location.trans_hash){
+		return rw, true
+	}
 	ln:=len(txs)
 	for i:=0; i<ln; i++{
 		var prev_trans Transaction=txs[i]
 		if bytes.Equal(prev_trans.TransactionHash(), t.prev_location.trans_hash){
-			return txs[i]
+			return txs[i], false
 		}
 	}
-	return Transaction{}
+	return Transaction{}, false
 }
+// func VerifyTX(t, Transaction, bc BlockChain, tAmouont float64) error{
+// 	ptx, isReward:=t.FindPrevTrx(bc)
+// 	sum:=ptx.amount+t.amount
+// 	if (t.VerifySig(ptx.pub_key)==nil){
+// 		if isReward{
+
+// 			if  sum==bc.GetRewardAmount(){
+// 				return nil
+// 			}
+// 		}else{
+// 			VerifyTX(ptx, bc, difference)
+// 		}
+// 	}
+// 	return errors.New("Transaction not Valid!"), -1
+// }
 func (t *Transaction) FindPrevPubKey(bc BlockChain) rsa.PublicKey{
-	return t.FindPrevTrx(bc).pub_key
+	ptx, _:=t.FindPrevTrx(bc)
+	return ptx.pub_key
 }
 func (t *Transaction) FindPrevTHash(bc BlockChain) []byte{
-	prtx:=t.FindPrevTrx(bc)
+	prtx, _:=t.FindPrevTrx(bc)
 	return prtx.TransactionHash()
 }
 //////////
@@ -296,6 +323,9 @@ func InitWallet(prname string, pbname string, txtname string) Wallet{
 func (w *Wallet) SaveTx(b Block){
 	wpk:=w.public_key
 	btxs:=b.transactions
+	if b.reward.pub_key==wpk{
+		w.transactions[b.index]=b.reward
+	}
 	for i:=0; i<len(btxs); i++{
 		if wpk==btxs[i].pub_key{
 			//w.transactions[b.hash]=btxs[i] on next version also save the merkle branches with merkle root

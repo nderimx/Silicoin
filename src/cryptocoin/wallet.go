@@ -21,6 +21,9 @@ func InitWallet(prname string, pbname string, txtname string) Wallet{
 func (w *Wallet) SaveTx(b Block){
 	wpk:=w.public_key
 	btxs:=b.transactions
+	if b.reward.pub_key==wpk{
+		w.transactions[b.index]=b.reward
+	}
 	for i:=0; i<len(btxs); i++{
 		if wpk==btxs[i].pub_key{
 			//w.transactions[b.hash]=btxs[i] on next version also save the merkle branches with merkle root

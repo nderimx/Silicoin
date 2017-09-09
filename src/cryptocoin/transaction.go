@@ -24,8 +24,9 @@ type Transaction struct{
 
 
 func NewTransaction(prk rsa.PrivateKey, opbk rsa.PublicKey, rpbk rsa.PublicKey,
-					 ammo float64, prev Transaction, blck_index int) (Transaction, Transaction){
+					 ammo float64, prev Transaction, blck_index int) (Transaction, Transaction, error){
 	now:=time.Now().UnixNano()
+	var err error=nil
 	payment:=Transaction{
 						pub_key: rpbk,
 	 					amount: ammo,
@@ -44,9 +45,11 @@ func NewTransaction(prk rsa.PrivateKey, opbk rsa.PublicKey, rpbk rsa.PublicKey,
 							prev_location: TransactionLocation{blck_index, prev.TransactionHash()}}
 		change.Sign(prk)
 	}else{
+		err=errors.New("You don't have enough units to make this payment")
+		payment=Transaction{}
 		change=Transaction{}
 	}
-	return payment, change
+	return payment, change, err
 
 }
 //This method should pull transactions from the wallet, depending on the amount to be transfered
@@ -94,30 +97,50 @@ func (t *Transaction) Sign(prk rsa.PrivateKey){
 		fmt.Println("Signing Error: ", err)
 	}
 }
-func (t *Transaction) Verify(prev_pub_key rsa.PublicKey) error{
+func (t *Transaction) VerifySig(prev_pub_key rsa.PublicKey) error{
 	err:=rsa.VerifyPKCS1v15(&prev_pub_key, crypto.SHA256, t.hash, t.signature)
 	if err!=nil{
-		return errors.New("Transaction not Valid!")
+		return errors.New("Transaction signature not Valid!")
 	}
 	return nil
 }
-func (t *Transaction) FindPrevTrx(bc BlockChain) Transaction{
+func (t *Transaction) FindPrevTrx(bc BlockChain) (Transaction, bool){
 	block:=bc.blocks[t.prev_location.block_index]
 	//ptrans:=block.transactions[t.prev_location.index]
 	txs:=block.transactions
+	rw:=block.reward
+	if bytes.Equal(rw.TransactionHash(), t.prev_location.trans_hash){
+		return rw, true
+	}
 	ln:=len(txs)
 	for i:=0; i<ln; i++{
 		var prev_trans Transaction=txs[i]
 		if bytes.Equal(prev_trans.TransactionHash(), t.prev_location.trans_hash){
-			return txs[i]
+			return txs[i], false
 		}
 	}
-	return Transaction{}
+	return Transaction{}, false
 }
+// func VerifyTX(t, Transaction, bc BlockChain, tAmouont float64) error{
+// 	ptx, isReward:=t.FindPrevTrx(bc)
+// 	sum:=ptx.amount+t.amount
+// 	if (t.VerifySig(ptx.pub_key)==nil){
+// 		if isReward{
+
+// 			if  sum==bc.GetRewardAmount(){
+// 				return nil
+// 			}
+// 		}else{
+// 			VerifyTX(ptx, bc, difference)
+// 		}
+// 	}
+// 	return errors.New("Transaction not Valid!"), -1
+// }
 func (t *Transaction) FindPrevPubKey(bc BlockChain) rsa.PublicKey{
-	return t.FindPrevTrx(bc).pub_key
+	ptx, _:=t.FindPrevTrx(bc)
+	return ptx.pub_key
 }
 func (t *Transaction) FindPrevTHash(bc BlockChain) []byte{
-	prtx:=t.FindPrevTrx(bc)
+	prtx, _:=t.FindPrevTrx(bc)
 	return prtx.TransactionHash()
 }
