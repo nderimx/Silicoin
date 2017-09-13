@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"bytes"
 )
-
 type BlockChain struct{
 	blocks []Block
 }
@@ -48,7 +47,8 @@ func (bc *BlockChain) ReceiveBlock(block Block) error{
 	if (
 	block.ValidateIndex(last_block)&&
 	block.ValidatePrevHash(last_block)&&
-	block.ValidateNonce(bc.GetDifficulty())){
+	block.ValidateNonce(bc.GetDifficulty())&&
+	VerifyTXS(block.transactions, bc)==nil){
 		bc.blocks=append(bc.blocks, block)
 		//validate all txs
 		return nil

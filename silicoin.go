@@ -10,6 +10,7 @@ import ("fmt"
 		"io/ioutil"
 		"encoding/json"
 		"errors"
+		"strconv"
 		)
 func main(){
 
@@ -34,7 +35,7 @@ func main(){
 	wallet1.SaveTx(chain1.LatestBlock())
 	wallet2.SaveTx(chain2.LatestBlock())
 	fmt.Println(chain1, "\n", chain2)
-	
+
 }
 ////////
 //Below methods get imported from /go/src/cryptocoin, but this is just a proof of concept
@@ -148,7 +149,8 @@ func (bc *BlockChain) ReceiveBlock(block Block) error{
 	if (
 	block.ValidateIndex(last_block)&&
 	block.ValidatePrevHash(last_block)&&
-	block.ValidateNonce(bc.GetDifficulty())){
+	block.ValidateNonce(bc.GetDifficulty())&&
+	VerifyTXS(block.transactions, bc)==nil){
 		bc.blocks=append(bc.blocks, block)
 		//validate all txs
 		return nil
@@ -267,7 +269,7 @@ func (t *Transaction) VerifySig(prev_pub_key rsa.PublicKey) error{
 	}
 	return nil
 }
-func (t *Transaction) FindPrevTrx(bc BlockChain) (Transaction, bool){
+func (t *Transaction) FindPrevTrx(bc *BlockChain) (Transaction, bool){
 	block:=bc.blocks[t.prev_location.block_index]
 	//ptrans:=block.transactions[t.prev_location.index]
 	txs:=block.transactions
@@ -284,26 +286,83 @@ func (t *Transaction) FindPrevTrx(bc BlockChain) (Transaction, bool){
 	}
 	return Transaction{}, false
 }
-// func VerifyTX(t, Transaction, bc BlockChain, tAmouont float64) error{
-// 	ptx, isReward:=t.FindPrevTrx(bc)
-// 	sum:=ptx.amount+t.amount
-// 	if (t.VerifySig(ptx.pub_key)==nil){
-// 		if isReward{
+/*
+func VerifyTX(t Transaction, bc BlockChain, tAmouont float64) error{
+	ptx, isReward:=t.FindPrevTrx(bc)
+	sum:=ptx.amount+t.amount
+	if (t.VerifySig(ptx.pub_key)==nil){
+		if isReward{
 
-// 			if  sum==bc.GetRewardAmount(){
-// 				return nil
-// 			}
-// 		}else{
-// 			VerifyTX(ptx, bc, difference)
-// 		}
-// 	}
-// 	return errors.New("Transaction not Valid!"), -1
-// }
-func (t *Transaction) FindPrevPubKey(bc BlockChain) rsa.PublicKey{
+			if  sum==bc.GetRewardAmount(){
+				return nil
+			}
+		}else{
+			VerifyTX(ptx, bc, difference)
+		}
+	}
+	return errors.New("Transaction not Valid!"), -1
+}*/
+func (t *Transaction) VerifyHash(ptx Transaction) error{
+	if bytes.Equal(ptx.TransactionHash(), t.prev_location.trans_hash){
+		return nil
+	}
+	return errors.New("Tx hashes don't match!")
+}
+func VerifyTXS(txs []Transaction, bc *BlockChain) error{
+	for i:=0; i<len(txs); i++{
+		ttxs:=[]Transaction{txs[i]}
+		for j:=i+1; j<len(txs); j++{
+			if bytes.Equal(txs[i].prev_location.trans_hash, txs[j].prev_location.trans_hash){
+				ttxs=append(ttxs, txs[j])
+				txs=append(txs[:j], txs[j+1:]...)
+			}
+		}
+		for{
+			var s float64=0
+			ptx, isMTRX:=ttxs[0].FindPrevTrx(bc)
+			for j:=0; j<len(ttxs); j++{
+				currentTransaction:=ttxs[j]
+				sigError:=currentTransaction.VerifySig(ptx.pub_key)
+				hashError:=currentTransaction.VerifyHash(ptx)
+				if sigError==nil && hashError==nil{
+					s+=currentTransaction.amount
+				}else{
+					return errors.New("Transaction has no link to another previous transaction")
+				}
+			}
+			if ptx.amount!=s{
+				return errors.New("Transaction amounts do not match!")
+			}
+			prblcki:=ttxs[0].prev_location.block_index
+			cblck1:=bc.LatestBlock().index //ad-hoc for now
+			for j:=prblcki+1; j<=cblck1; j++{
+				cbt:=bc.blocks[j].transactions
+				for k:=0; k<len(cbt); k++{
+					if bytes.Equal(cbt[k].prev_location.trans_hash, ptx.TransactionHash()){
+						return errors.New("Transaction already spent.")
+					}
+				}
+			}
+			if isMTRX{
+				isMTRX=false
+				break
+			}
+			ttxs:=[]Transaction{ptx}
+			btx:=bc.blocks[prblcki].transactions
+			for j:=i+1; j<len(btx); j++{
+				if bytes.Equal(ptx.prev_location.trans_hash, btx[j].prev_location.trans_hash){
+					ttxs=append(ttxs, btx[j])
+				}
+			}
+		}
+	}
+	return nil
+}
+func (t *Transaction) FindPrevPubKey(bc *BlockChain) rsa.PublicKey{
 	ptx, _:=t.FindPrevTrx(bc)
 	return ptx.pub_key
 }
-func (t *Transaction) FindPrevTHash(bc BlockChain) []byte{
+func (t *Transaction) FindPrevTHash(bc *BlockChain) []byte{
 	prtx, _:=t.FindPrevTrx(bc)
 	return prtx.TransactionHash()
 }
@@ -354,12 +413,12 @@ func GeneratePair(bitSize int, prname string, pbname string){
 	SaveJsn(pbname, publicKey)
 }
 func GetTxTable(txtname string) map[int]Transaction{
-	var txs map[int]Transaction
+	var txs map[string]Transaction
 	JaceUp(txtname, &txs)
-	return txs
+	return ConvMap(txs)
 }
 func GenerateTxTable(txtname string){
-	txs:=map[int]Transaction{}
+	txs:=map[string]Transaction{}
 	SaveJsn(txtname, txs)
 }
 func check(e error){
@@ -377,4 +436,20 @@ func JaceUp(name string, t interface{}){
 	check(err)
 	err=json.Unmarshal(file, t)
 	check(err)
+}
+func ConvMap(input map[string]Transaction) map[int]Transaction{
+	iLen:=len(input)
+	integers:=make([]int, iLen)
+	transacters:=make([]Transaction, iLen)
+	output:=make(map[int]Transaction, iLen)
+	i:=0
+	for key, value:=range input{
+		integers[i], _=strconv.Atoi(key)
+		transacters[i]=value
+		i++
+	}
+	for i:=0; i<iLen; i++{
+		output[integers[i]]=transacters[i]
+	}
+	return output
 }

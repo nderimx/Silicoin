@@ -52,12 +52,12 @@ func GeneratePair(bitSize int, prname string, pbname string){
 	SaveJsn(pbname, publicKey)
 }
 func GetTxTable(txtname string) map[int]Transaction{
-	var txs map[int]Transaction
+	var txs map[string]Transaction
 	JaceUp(txtname, &txs)
-	return txs
+	return ConvMap(txs)
 }
 func GenerateTxTable(txtname string){
-	txs:=map[int]Transaction{}
+	txs:=map[string]Transaction{}
 	SaveJsn(txtname, txs)
 }
 func check(e error){
@@ -75,4 +75,20 @@ func JaceUp(name string, t interface{}){
 	check(err)
 	err=json.Unmarshal(file, t)
 	check(err)
+}
+func ConvMap(input map[string]Transaction) map[int]Transaction{
+	iLen:=len(input)
+	integers:=make([]int, iLen)
+	transacters:=make([]Transaction, iLen)
+	output:=make(map[int]Transaction, iLen)
+	i:=0
+	for key, value:=range input{
+		integers[i], _=strconv.Atoi(key)
+		transacters[i]=value
+		i++
+	}
+	for i:=0; i<iLen; i++{
+		output[integers[i]]=transacters[i]
+	}
+	return output
 }
