@@ -1,17 +1,17 @@
 package main
 
 import ("fmt"
-		"time"
-		"crypto/sha256"
-		"bytes"
-		"crypto/rsa"
-		"crypto/rand"
-		"crypto"
-		"io/ioutil"
-		"encoding/json"
-		"errors"
-		"strconv"
-		)
+	"time"
+	"crypto/sha256"
+	"bytes"
+	"crypto/rsa"
+	"crypto/rand"
+	"crypto"
+	"io/ioutil"
+	"encoding/json"
+	"errors"
+	"strconv"
+	)
 func main(){
 
 	wallet1:=InitWallet("pr.key", "pb.key", "tz")
@@ -20,7 +20,9 @@ func main(){
 	chain1:=NewChain(wallet1.private_key, wallet1.public_key)
 	wallet1.SaveTx(chain1.LatestBlock())
 	chain2:=chain1
+	fmt.Println("copied chain1 to chain2")
 	//w1 paying w2 25 units
+	fmt.Println("making a transaction...")
 	firstTX, firstCHNG, terr:=NewTransaction(wallet1.private_key,
 						wallet1.public_key,
 						wallet2.public_key,
@@ -28,13 +30,18 @@ func main(){
 	check(terr)
 	mtrx:=chain2.MinedTransaction(wallet2.private_key, wallet2.public_key)
 	txs:=[]Transaction{firstTX, firstCHNG}
-	fmt.Println("generating new block...")
+	fmt.Println("generating new block on chain2...")
 	block:=chain2.GenerateBlock(txs, mtrx)
+	fmt.Println("receiving new Block on chain1")
 	err:=chain1.ReceiveBlock(block)
 	check(err)
 	wallet1.SaveTx(chain1.LatestBlock())
 	wallet2.SaveTx(chain2.LatestBlock())
-	fmt.Println(chain1, "\n", chain2)
+	b1:=chain1.LatestBlock()
+	b2:=chain2.LatestBlock()
+	eq:=bytes.Equal(b1.Hash(), b2.Hash())
+	fmt.Println(chain1, "\n",chain2)
+	ft.Println("both chains have the same last block?: ", eq)
 
 }
 ////////
@@ -309,6 +316,8 @@ func (t *Transaction) VerifyHash(ptx Transaction) error{
 	return errors.New("Tx hashes don't match!")
 }
 func VerifyTXS(txs []Transaction, bc *BlockChain) error{
+	var prevBlockI int
+	var currentBlockI int
 	for i:=0; i<len(txs); i++{
 		ttxs:=[]Transaction{txs[i]}
 		for j:=i+1; j<len(txs); j++{
@@ -317,6 +326,7 @@ func VerifyTXS(txs []Transaction, bc *BlockChain) error{
 				txs=append(txs[:j], txs[j+1:]...)
 			}
 		}
+		isLatestBlock:=true
 		for{
 			var s float64=0
 			ptx, isMTRX:=ttxs[0].FindPrevTrx(bc)
@@ -333,9 +343,14 @@ func VerifyTXS(txs []Transaction, bc *BlockChain) error{
 			if ptx.amount!=s{
 				return errors.New("Transaction amounts do not match!")
 			}
-			prblcki:=ttxs[0].prev_location.block_index
-			cblck1:=bc.LatestBlock().index //ad-hoc for now
-			for j:=prblcki+1; j<=cblck1; j++{
+			if isLatestBlock{
+				currentBlockI=bc.LatestBlock().index
+				isLatestBlock=false
+			}else {
+				currentBlockI=prevBlockI
+			}
+			prevBlockI=ttxs[0].prev_location.block_index
+			for j:=prevBlockI+1; j<=currentBlockI; j++{
 				cbt:=bc.blocks[j].transactions
 				for k:=0; k<len(cbt); k++{
 					if bytes.Equal(cbt[k].prev_location.trans_hash, ptx.TransactionHash()){
@@ -348,7 +363,7 @@ func VerifyTXS(txs []Transaction, bc *BlockChain) error{
 				break
 			}
 			ttxs:=[]Transaction{ptx}
-			btx:=bc.blocks[prblcki].transactions
+			btx:=bc.blocks[prevBlockI].transactions
 			for j:=i+1; j<len(btx); j++{
 				if bytes.Equal(ptx.prev_location.trans_hash, btx[j].prev_location.trans_hash){
 					ttxs=append(ttxs, btx[j])
